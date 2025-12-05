@@ -1,57 +1,77 @@
 #!/usr/bin/env bash
 
+INPUT_DIR=""
+OUTPUT_DIR=""
 
-OUTPUT=""
-INPUT=""
-DIR=""
+QUALITY=80
+MAX_HEIGHT=1800
+
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        -i|--input) INPUT="$2"; shift ;;
-        -o|--output) OUTPUT="$2"; shift ;;
-        -d|--dir) DIR="$2"; shift ;;
+        -i|--input) INPUT_DIR="$2"; shift ;;
+        -o|--output) OUTPUT_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
     shift
-done     
+done  
 
-MODE=""
-if [ -n "$INPUT" ]; then MODE="file"; fi
-if [ -n "$DIR" ]; then MODE="dir"; fi
+if [ -z "$INPUT_DIR" ]; then exit 1; fi
+if [ -z "$OUTPUT_DIR" ]; then 
+    OUTPUT_DIR="${INPUT_DIR}_converted"
+fi
 
-if [ -z "$MODE" ]; then exit 1; fi
+get_jpg_size() {
+    file="$1"
+    
+    echo $file
+    ffprobe -v error -select_streams v:0 \
+        -show_entries stream=width,height \
+        -of csv=p=0 $file
+}
 
-convert() {
+convert_photo() {
 
     in="$1"
     out="$2"
 
-    ffmpeg -i $in -b:v 2000k -b:a 96k -f webm -threads 6 -y $out
+    # -resize_mode <string> .. one of: up_only, down_only, always (default)
 
-} && export -f convert
+    echo "Converting photo: $in to $out"
+    cwebp -q $QUALITY -preset photo -hint photo \
+        -metadata all \
+        -resize 0 $MAX_HEIGHT \
+        -mt \
+        -quiet \
+        "$in" -o "$out"
+}
 
+convert_video() {
 
-if [ "$MODE" == "file" ]; then
+    in="$1"
+    out="$2"
 
-    if [ -z "$OUTPUT" ]; then
-        OUTPUT=$(basename $INPUT .mp4)
-        OUTPUT="${OUTPUT}.webm"
-    fi
+    echo "Converting video: $in to $out"
+    ffmpeg -i $in -b:v 2000k -b:a 96k -f webm -threads 6 \
+        -hide_banner -nostats -loglevel error -y $out
+}
 
-    convert $INPUT $OUTPUT
-fi
+mkdir -p $OUTPUT_DIR
 
-if [ "$MODE" == "dir" ]; then
-
-    if [ -z "$OUTPUT" ]; then
-        OUTPUT="./out"
-    fi
-
-    mkdir -p $OUTPUT
-
-    for f in $DIR/*.mp4
-    do
-        FILE_NAME=$(basename $f .mp4)
-        FILE_NAME="$OUTPUT/${FILE_NAME}.webm"
-        convert $f $FILE_NAME
-    done
-fi
+for f in "$INPUT_DIR"/*
+do
+    FILE_EXT="${f##*.}"
+    FILE_NAME=$(basename "$f" ".$FILE_EXT")
+    case "$FILE_EXT" in
+        png|PNG|jpg|JPG|jpeg|JPEG)
+            FILE_OUT="$OUTPUT_DIR/${FILE_NAME}.webp"
+            convert_photo "$f" "$FILE_OUT"
+            ;;
+        mp4|MP4|mov|MOV|avi|AVI)
+            FILE_OUT="$OUTPUT_DIR/${FILE_NAME}.webm"
+            convert_video "$f" "$FILE_OUT"
+            ;;
+        *)
+            echo "Skipping unsupported file type: $f"
+            ;;
+    esac
+done    
